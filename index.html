@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sorry</title>
+<style>
+:root {
+  --bg: #000000;
+  --ink: #ffb6c1;
+  --ink-dim: #6b4249;
+  --font: Arial, Helvetica, "Liberation Sans", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  overflow: hidden;
+  box-sizing: border-box;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px;
+}
+.stage {
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+canvas { display: block; max-width: 100%; }
+.replay {
+  position: fixed;
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-dim);
+  background: var(--bg);
+  color: var(--ink);
+  font: 20px/1 var(--font);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity .2s;
+}
+.replay:hover, .replay:focus-visible { opacity: 1; }
+.replay:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <canvas id="c" role="img" aria-label="SORRY"></canvas>
+</div>
+<button class="replay" id="replay" type="button" aria-label="Replay">&#8635;</button>
+
+<script>
+(function () {
+  var TEXT = "sorry";
+  var INK = "#ffb6c1";
+  var FONT = 'Arial, Helvetica, "Liberation Sans", sans-serif';
+  var FS = 5.2;
+  var STEP = 4.6;
+  var OFFSETS = [1.5, -1.5, 4.5, -4.5, 7.5, -7.5];
+  var GAP = 22;
+  var DURATION = 7000;
+
+  function arc(cx, cy, rx, ry, a0, a1) {
+    var pts = [], n = Math.max(8, Math.ceil(Math.abs(a1 - a0) / 3));
+    for (var i = 0; i <= n; i++) {
+      var a = (a0 + (a1 - a0) * i / n) * Math.PI / 180;
+      pts.push([cx + rx * Math.cos(a), cy + ry * Math.sin(a)]);
+    }
+    return pts;
+  }
+  function line(x0, y0, x1, y1) { return [[x0, y0], [x1, y1]]; }
+  function join() {
+    var out = [];
+    for (var i = 0; i < arguments.length; i++) {
+      var p = arguments[i];
+      for (var j = out.length ? 1 : 0; j < p.length; j++) out.push(p[j]);
+    }
+    return out;
+  }
+
+  var R = { w: 58, strokes: [
+    join(line(8, 0, 8, 100), line(8, 100, 30, 100), arc(30, 76, 24, 24, 90, -90), line(30, 52, 8, 52)),
+    line(24, 52, 54, 0)
+  ] };
+  var LETTERS = [
+    { w: 58, strokes: [join(arc(30, 72, 22, 22, 30, 270), arc(30, 24, 26, 26, 90, -150))] },
+    { w: 62, strokes: [arc(32, 50, 27, 50, 90, 450)] },
+    R,
+    R,
+    { w: 60, strokes: [join(line(6, 100, 31, 48), line(31, 48, 31, 0)), line(56, 100, 31, 48)] }
+  ];
+
+  function lengths(poly) {
+    var acc = [0];
+    for (var i = 1; i < poly.length; i++) {
+      var dx = poly[i][0] - poly[i - 1][0], dy = poly[i][1] - poly[i - 1][1];
+      acc.push(acc[i - 1] + Math.sqrt(dx * dx + dy * dy));
+    }
+    return acc;
+  }
+  function pointAt(poly, acc, s) {
+    var L = acc[acc.length - 1];
+    s = Math.max(0, Math.min(L, s));
+    for (var i = 1; i < acc.length; i++) {
+      if (acc[i] >= s) {
+        var seg = acc[i] - acc[i - 1] || 1, t = (s - acc[i - 1]) / seg;
+        return [poly[i - 1][0] + (poly[i][0] - poly[i - 1][0]) * t,
+                poly[i - 1][1] + (poly[i][1] - poly[i - 1][1]) * t];
+      }
+    }
+    return poly[poly.length - 1];
+  }
+
+  var samples = LETTERS.map(function (letter) {
+    var list = [];
+    letter.strokes.forEach(function (poly) {
+      var acc = lengths(poly), L = acc[acc.length - 1];
+      var n = Math.max(2, Math.round(L / STEP));
+      for (var i = 0; i <= n; i++) {
+        var s = L * i / n;
+        var p = pointAt(poly, acc, s);
+        var a = pointAt(poly, acc, s - 3), b = pointAt(poly, acc, s + 3);
+        var tx = b[0] - a[0], ty = b[1] - a[1], len = Math.sqrt(tx * tx + ty * ty) || 1;
+        list.push([p[0], p[1], -ty / len, tx / len]);
+      }
+    });
+    return list;
+  });
+
+  var seq = [];
+  OFFSETS.forEach(function (d) {
+    samples.forEach(function (list, li) {
+      list.forEach(function (q) { seq.push([li, q[0] + q[2] * d, q[1] + q[3] * d]); });
+    });
+  });
+
+  var letterX = [], x0 = 0;
+  LETTERS.forEach(function (L) { letterX.push(x0); x0 += L.w + GAP; });
+
+  var stage = document.getElementById("stage");
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var minX, maxX, minY, maxY, s = 1, drawn = 0, start = 0, raf = 0;
+
+  function bounds() {
+    ctx.font = "bold 100px " + FONT;
+    var half = ctx.measureText(TEXT).width / 100 * FS / 2 + 1;
+    minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
+    seq.forEach(function (p) {
+      var x = p[1] + letterX[p[0]], y = p[2];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    });
+    minX -= half; maxX += half; minY -= FS * 0.35; maxY += FS * 0.85;
+  }
+
+  function layout() {
+    bounds();
+    var W = maxX - minX, H = maxY - minY;
+    s = Math.max(0.1, Math.min(stage.clientWidth / W, stage.clientHeight / H));
+    var dpr = window.devicePixelRatio || 1;
+    canvas.style.width = (W * s) + "px";
+    canvas.style.height = (H * s) + "px";
+    canvas.width = Math.round(W * s * dpr);
+    canvas.height = Math.round(H * s * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = INK;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.font = "bold " + (FS * s) + "px " + FONT;
+  }
+
+  function drawPoint(i) {
+    var p = seq[i];
+    ctx.fillText(TEXT, (p[1] + letterX[p[0]] - minX) * s, (maxY - p[2]) * s);
+  }
+
+  function redrawUpTo(n) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (var i = 0; i < n; i++) drawPoint(i);
+  }
+
+  function tick(now) {
+    if (!start) start = now;
+    var target = Math.min(seq.length, Math.floor(seq.length * (now - start) / DURATION));
+    while (drawn < target) drawPoint(drawn++);
+    if (drawn < seq.length) raf = requestAnimationFrame(tick);
+  }
+
+  function play() {
+    cancelAnimationFrame(raf);
+    layout();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawn = 0; start = 0;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      drawn = seq.length; redrawUpTo(drawn); return;
+    }
+    raf = requestAnimationFrame(tick);
+  }
+
+  var resizeTimer = 0;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { layout(); redrawUpTo(drawn); }, 80);
+  });
+  document.getElementById("replay").addEventListener("click", play);
+
+  play();
+})();
+</script>
+</body>
+</html>
